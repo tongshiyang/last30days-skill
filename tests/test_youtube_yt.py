@@ -409,34 +409,34 @@ class TestSearchAndTranscribe(unittest.TestCase):
 
 
 class TestYtdlpSSHRouting(unittest.TestCase):
-    """LAST30DAYS_YT_SSH_HOST routes yt-dlp invocations through SSH for residential IP."""
+    """LAST30DAYS_YOUTUBE_SSH_HOST routes yt-dlp invocations through SSH for residential IP."""
 
     def setUp(self):
         # Ensure clean env for each test
-        self._saved_env = os.environ.pop("LAST30DAYS_YT_SSH_HOST", None)
+        self._saved_env = os.environ.pop("LAST30DAYS_YOUTUBE_SSH_HOST", None)
 
     def tearDown(self):
-        os.environ.pop("LAST30DAYS_YT_SSH_HOST", None)
+        os.environ.pop("LAST30DAYS_YOUTUBE_SSH_HOST", None)
         if self._saved_env is not None:
-            os.environ["LAST30DAYS_YT_SSH_HOST"] = self._saved_env
+            os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = self._saved_env
 
     def test_no_env_var_returns_none(self):
         """Without the env var set, _ytdlp_ssh_host returns None."""
         self.assertIsNone(youtube_yt._ytdlp_ssh_host())
 
     def test_env_var_returns_host(self):
-        """With LAST30DAYS_YT_SSH_HOST set, _ytdlp_ssh_host returns it."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "macmini"
+        """With LAST30DAYS_YOUTUBE_SSH_HOST set, _ytdlp_ssh_host returns it."""
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         self.assertEqual(youtube_yt._ytdlp_ssh_host(), "macmini")
 
     def test_env_var_whitespace_stripped(self):
         """Whitespace around the host alias is stripped."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "  macmini  "
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "  macmini  "
         self.assertEqual(youtube_yt._ytdlp_ssh_host(), "macmini")
 
     def test_empty_env_var_falls_back_to_none(self):
         """An empty env var is treated as unset."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = ""
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = ""
         self.assertIsNone(youtube_yt._ytdlp_ssh_host())
 
     def test_wrap_cmd_passthrough_when_unset(self):
@@ -446,7 +446,7 @@ class TestYtdlpSSHRouting(unittest.TestCase):
 
     def test_wrap_cmd_prepends_ssh_when_set(self):
         """_wrap_ytdlp_cmd prepends ssh <host> when SSH routing is on."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "macmini"
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         cmd = ["yt-dlp", "--ignore-config", "ytsearch5:test"]
         wrapped = youtube_yt._wrap_ytdlp_cmd(cmd)
         self.assertEqual(wrapped[0], "ssh")
@@ -462,29 +462,52 @@ class TestYtdlpSSHRouting(unittest.TestCase):
 
     def test_wrap_cmd_quotes_args_with_spaces(self):
         """Args containing spaces or special chars are shell-quoted."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "macmini"
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         cmd = ["yt-dlp", "ytsearch5:hello world", "--dump-json"]
         wrapped = youtube_yt._wrap_ytdlp_cmd(cmd)
         # shlex.quote wraps the whole arg in single quotes when it contains spaces
         self.assertIn("'ytsearch5:hello world'", wrapped[5])
 
     def test_wrap_cmd_uses_option_terminator(self):
-        """`--` is inserted before host to prevent SSH option injection.
-
-        Without `--`, an env var like `LAST30DAYS_YT_SSH_HOST=-oProxyCommand=...`
-        would be parsed by ssh as an option flag. The terminator forces it
-        to be treated as a hostname (which will then fail clean if invalid).
-        """
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "-oFoo=bar"
+        """`--` is inserted before host as defense-in-depth even for valid hosts."""
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         cmd = ["yt-dlp", "--version"]
         wrapped = youtube_yt._wrap_ytdlp_cmd(cmd)
-        # Find the `--` terminator and verify the host comes immediately after
         dash_idx = wrapped.index("--")
-        self.assertEqual(wrapped[dash_idx + 1], "-oFoo=bar")
+        self.assertEqual(wrapped[dash_idx + 1], "macmini")
+
+    def test_host_alias_with_dash_prefix_is_rejected(self):
+        """A host value starting with `-` is rejected by the alias validator.
+
+        Without validation, ssh could parse `-oProxyCommand=...` as a flag
+        instead of a hostname. The `--` terminator in _wrap_ytdlp_cmd is
+        defense-in-depth; this regex on _ytdlp_ssh_host() rejects the value
+        before it ever reaches the ssh command line.
+        """
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "-oProxyCommand=evil"
+        self.assertIsNone(youtube_yt._ytdlp_ssh_host())
+        # And the wrap function falls back to the local-execution path.
+        cmd = ["yt-dlp", "--version"]
+        self.assertEqual(youtube_yt._wrap_ytdlp_cmd(cmd), cmd)
+
+    def test_host_alias_with_shell_metacharacters_is_rejected(self):
+        """Host values containing spaces, semicolons, $, etc. are rejected."""
+        for bad in ("host;rm -rf /", "host name", "host$IFS", "host`whoami`", "host&cmd"):
+            os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = bad
+            self.assertIsNone(
+                youtube_yt._ytdlp_ssh_host(),
+                msg=f"validator should reject {bad!r}",
+            )
+
+    def test_host_alias_validator_accepts_realistic_aliases(self):
+        """Valid SSH config aliases are accepted: bare names, FQDNs, IPs."""
+        for good in ("macmini", "home-server", "pi5.local", "192.168.1.10", "homelab_box"):
+            os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = good
+            self.assertEqual(youtube_yt._ytdlp_ssh_host(), good)
 
     def test_is_ytdlp_installed_short_circuits_with_ssh(self):
         """is_ytdlp_installed returns True without local check when SSH routing is on."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "macmini"
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         with mock.patch("lib.youtube_yt.shutil.which", return_value=None) as which_mock:
             self.assertTrue(youtube_yt.is_ytdlp_installed())
             which_mock.assert_not_called()
@@ -498,7 +521,7 @@ class TestYtdlpSSHRouting(unittest.TestCase):
 
     def test_search_call_routes_through_ssh(self):
         """search_youtube wraps the yt-dlp invocation when SSH routing is on."""
-        os.environ["LAST30DAYS_YT_SSH_HOST"] = "macmini"
+        os.environ["LAST30DAYS_YOUTUBE_SSH_HOST"] = "macmini"
         from lib.subproc import SubprocResult
         fake_result = SubprocResult(returncode=0, stdout="", stderr="")
         with mock.patch.object(youtube_yt.subproc, "run_with_timeout",

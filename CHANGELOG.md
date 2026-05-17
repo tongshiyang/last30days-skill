@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `LAST30DAYS_YT_SSH_HOST` env var: when set, yt-dlp YouTube search invocations are routed through `ssh <host>` for residential-IP egress. Bypasses YouTube's bot-wall on datacenter IPs (Hetzner/DigitalOcean/AWS) where `ytsearch:` returns 0 results regardless of cookies (the IP fingerprint is checked first). The named host must be configured in `~/.ssh/config` and have yt-dlp installed. The transcript path is unchanged (uses the existing HTTP fallback when SSH-routing is on, since the timedtext API isn't bot-walled).
+- `LAST30DAYS_YOUTUBE_SSH_HOST` env var: when set, yt-dlp YouTube search invocations are routed through `ssh <host>` for residential-IP egress. Bypasses YouTube's bot-wall on datacenter IPs (Hetzner/DigitalOcean/AWS) where `ytsearch:` returns 0 results regardless of cookies (the IP fingerprint is checked first). The named host must be configured in `~/.ssh/config` and have yt-dlp installed. Host value is validated against `^[a-zA-Z0-9._-]+$` to reject SSH option-injection (e.g. a leading `-` masquerading as a flag). The transcript path is unchanged (uses the existing HTTP fallback when SSH-routing is on, since the timedtext API isn't bot-walled).
 
 ### Changed
 
