@@ -494,7 +494,7 @@ def _shorten_question(question: str) -> str:
     if m and len(m.group(1).split()) <= 4:
         return m.group(1).strip()
     # Fallback: truncate, dropping a leading article so the name doesn't read "an"/"the"
-    text = question[:40] if len(question) > 40 else question
+    text = q[:40] if len(q) > 40 else q
     return re.sub(r"^(?:a|an|the)\s+", "", text, flags=re.I)
 
 
